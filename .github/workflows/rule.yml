@@ -18,12 +18,12 @@ jobs:
 
       - name: Toggle branch protection
         env:
-          BRANCH_NAME: test2
+          BRANCH_NAME: test3
           ACTION: ${{ github.event.inputs.action }}
         run: |
           if [ "$ACTION" == "enable" ]; then
             curl -X PUT \
-              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Authorization: token ${{ github.token }}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection \
@@ -49,7 +49,7 @@ jobs:
                   }'
           elif [ "$ACTION" == "disable" ]; then
             curl -X DELETE \
-              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Authorization: token ${{ github.token }}" \
               -H "Accept: application/vnd.github.luke-cage-preview+json" \
               https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection
           else
