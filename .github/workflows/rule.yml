@@ -18,38 +18,69 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Fetch current branch protection settings
+        id: fetch-protection
+        run: |
+          CURRENT_PROTECTION=$(curl -s -X GET \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github.luke-cage-preview+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/${{ github.event.inputs.branch }}/protection")
+          echo "::set-output name=protection::${CURRENT_PROTECTION}"
+
       - name: Toggle lock branch protection
         env:
           BRANCH_NAME: ${{ github.event.inputs.branch }}
           ACTION: ${{ github.event.inputs.action }}
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # Personal Access Token
         run: |
+          CURRENT_PROTECTION="${{ steps.fetch-protection.outputs.protection }}"
+
           if [ "$ACTION" == "enable" ]; then
             # Enable lock branch protection
-            curl -X PUT \
+            UPDATED_SETTINGS=$(echo "$CURRENT_PROTECTION" | jq '. | {
+              required_status_checks: .required_status_checks,
+              enforce_admins: .enforce_admins,
+              required_pull_request_reviews: .required_pull_request_reviews,
+              restrictions: .restrictions,
+              required_linear_history: .required_linear_history,
+              allow_force_pushes: .allow_force_pushes,
+              allow_deletions: .allow_deletions,
+              block_creations: .block_creations,
+              required_conversation_resolution: .required_conversation_resolution,
+              lock_branch: true,
+              allow_fork_syncing: .allow_fork_syncing
+            }')
+
+            curl -X PATCH \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github.luke-cage-preview+json" \
               -H "Content-Type: application/json" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection" \
-              -d '{
-                    "required_status_checks": null,
-                    "enforce_admins": null,
-                    "required_pull_request_reviews": null,
-                    "restrictions": null,
-                    "required_linear_history": null,
-                    "allow_force_pushes": null,
-                    "allow_deletions": null,
-                    "block_creations": null,
-                    "required_conversation_resolution": null,
-                    "lock_branch": true,
-                    "allow_fork_syncing": null
-                  }'
+              -d "$UPDATED_SETTINGS"
+          
           elif [ "$ACTION" == "disable" ]; then
             # Disable lock branch protection
-            curl -X DELETE \
+            UPDATED_SETTINGS=$(echo "$CURRENT_PROTECTION" | jq '. | {
+              required_status_checks: .required_status_checks,
+              enforce_admins: .enforce_admins,
+              required_pull_request_reviews: .required_pull_request_reviews,
+              restrictions: .restrictions,
+              required_linear_history: .required_linear_history,
+              allow_force_pushes: .allow_force_pushes,
+              allow_deletions: .allow_deletions,
+              block_creations: .block_creations,
+              required_conversation_resolution: .required_conversation_resolution,
+              lock_branch: false,
+              allow_fork_syncing: .allow_fork_syncing
+            }')
+
+            curl -X PATCH \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection"
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection" \
+              -d "$UPDATED_SETTINGS"
+          
           else
             echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
             exit 1
