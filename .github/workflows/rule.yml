@@ -19,7 +19,7 @@ jobs:
       - name: Toggle branch protection
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-          BRANCH_NAME: main
+          BRANCH_NAME: test2
           ACTION: ${{ github.event.inputs.action }}
         run: |
           if [ "$ACTION" == "enable" ]; then
@@ -30,7 +30,15 @@ jobs:
               -d '{
                     "required_status_checks": null,
                     "enforce_admins": null,
-                    "required_pull_request_reviews": null,
+                    "required_pull_request_reviews": {
+                      "require_code_owner_reviews": false,
+                      "required_approving_review_count": 2,
+                      "dismiss_stale_reviews": true,
+                      "dismissal_restrictions": {
+                        "users": [],
+                        "teams": []
+                      }
+                    },
                     "restrictions": null
                   }'
           elif [ "$ACTION" == "disable" ]; then
