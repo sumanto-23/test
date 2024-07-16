@@ -1,58 +1,37 @@
-name: Toggle Branch Protection
+name: Modify Branch Protection and Enable Branch Locking
 
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Action to perform: enable or disable'
+      branch:
+        description: 'Branch name to modify protection'
         required: true
-        default: 'enable' # Default action
 
 jobs:
-  toggle-protection:
+  modify-protection:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Toggle branch protection
+      - name: Modify branch protection
         env:
-          BRANCH_NAME: test3
-          ACTION: ${{ github.event.inputs.action }}
+          BRANCH_NAME: ${{ github.event.inputs.branch }}
         run: |
-          if [ "$ACTION" == "enable" ]; then
-            curl -X PUT \
-              -H "Authorization: token ${{ github.token }}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection \
-              -d '{
-                    "required_status_checks": {
-                      "strict": true,
-                      "contexts": ["continuous-integration/travis-ci"]
-                    },
-                    "enforce_admins": true,
-                    "required_pull_request_reviews": {
-                      "dismiss_stale_reviews": true,
-                      "require_code_owner_reviews": true,
-                      "required_approving_review_count": 2
-                    },
-                    "restrictions": null,
-                    "required_linear_history": true,
-                    "allow_force_pushes": true,
-                    "allow_deletions": true,
-                    "block_creations": true,
-                    "required_conversation_resolution": true,
-                    "lock_branch": true,
-                    "allow_fork_syncing": true
-                  }'
-          elif [ "$ACTION" == "disable" ]; then
-            curl -X DELETE \
-              -H "Authorization: token ${{ github.token }}" \
-              -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection
-          else
-            echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
-            exit 1
-          fi
+          # Get current branch protection settings
+          CURRENT_PROTECTION=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection)
+
+          # Parse existing settings and enable lock branch
+          NEW_SETTINGS=$(echo $CURRENT_PROTECTION | jq '. + {
+              "lock_branch": true
+            }')
+
+          # Update branch protection with new settings
+          curl -X PUT \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection \
+            -d "$NEW_SETTINGS"
