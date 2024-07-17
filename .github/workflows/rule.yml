@@ -19,7 +19,7 @@ jobs:
       - name: Toggle branch protection
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-          BRANCH_NAME: test4
+          BRANCH_NAME: test2
           ACTION: ${{ github.event.inputs.action }}
         run: |
           if [ "$ACTION" == "enable" ]; then
