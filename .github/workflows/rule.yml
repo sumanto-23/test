@@ -1,58 +1,132 @@
-name: Toggle Branch Protection
+name: Manage Lock Branch Protection
 
 on:
+
   workflow_dispatch:
+
     inputs:
-      action:
-        description: 'Action to perform: enable or disable'
+
+      branch:
+
+        description: 'Branch name to update'
+
         required: true
-        default: 'enable' # Default action
+
+        default: 'main'
+
+      action:
+
+        description: 'Action to perform (enable or disable lock branch)'
+
+        required: true
+
+        default: 'enable'
+
+        type: choice
+
+        options:
+
+          - enable
+
+          - disable
 
 jobs:
-  toggle-protection:
+
+  manage_lock_branch:
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
 
-      - name: Toggle branch protection
-        env:
-          BRANCH_NAME: test3
-          ACTION: ${{ github.event.inputs.action }}
-        run: |
-          if [ "$ACTION" == "enable" ]; then
-            curl -X PUT \
-              -H "Authorization: token ${{ github.token }}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection \
-              -d '{
-                    "required_status_checks": {
-                      "strict": true,
-                      "contexts": ["continuous-integration/travis-ci"]
-                    },
-                    "enforce_admins": true,
-                    "required_pull_request_reviews": {
-                      "dismiss_stale_reviews": true,
-                      "require_code_owner_reviews": true,
-                      "required_approving_review_count": 2
-                    },
-                    "restrictions": null,
-                    "required_linear_history": true,
-                    "allow_force_pushes": true,
-                    "allow_deletions": true,
-                    "block_creations": true,
-                    "required_conversation_resolution": true,
-                    "lock_branch": true,
-                    "allow_fork_syncing": true
-                  }'
-          elif [ "$ACTION" == "disable" ]; then
-            curl -X DELETE \
-              -H "Authorization: token ${{ github.token }}" \
-              -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection
-          else
-            echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
-            exit 1
-          fi
+    - name: Get existing branch protection settings
+
+      id: get_protection
+
+      uses: actions/github-script@v6
+
+      with:
+
+        script: |
+
+          const branch = context.payload.inputs.branch;
+
+          const owner = context.repo.owner;
+
+          const repo = context.repo.repo;
+
+          try {
+
+            const response = await github.repos.getBranchProtection({
+
+              owner,
+
+              repo,
+
+              branch
+
+            });
+
+            return JSON.stringify(response.data);
+
+          } catch (error) {
+
+            return JSON.stringify({});
+
+          }
+
+      env:
+
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Manage lock branch protection
+
+      uses: actions/github-script@v6
+
+      with:
+
+        script: |
+
+          const branch = context.payload.inputs.branch;
+
+          const action = context.payload.inputs.action;
+
+          const lockBranch = action === 'enable';
+
+          const owner = context.repo.owner;
+
+          const repo = context.repo.repo;
+
+          const existingProtection = JSON.parse(process.env.GET_PROTECTION);
+
+          const protectionSettings = {
+
+            required_status_checks: existingProtection.required_status_checks || null,
+
+            enforce_admins: existingProtection.enforce_admins || false,
+
+            required_pull_request_reviews: existingProtection.required_pull_request_reviews || null,
+
+            restrictions: existingProtection.restrictions || null,
+
+            lock_branch: lockBranch
+
+          };
+
+          await github.repos.updateBranchProtection({
+
+            owner,
+
+            repo,
+
+            branch,
+
+            ...protectionSettings
+
+          });
+
+      env:
+
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        GET_PROTECTION: ${{ steps.get_protection.outputs.result }}
+ 
