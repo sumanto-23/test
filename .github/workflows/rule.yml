@@ -76,7 +76,7 @@ jobs:
 
       env:
 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 
     - name: Manage lock branch protection
 
@@ -126,7 +126,7 @@ jobs:
 
       env:
 
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 
         GET_PROTECTION: ${{ steps.get_protection.outputs.result }}
  
