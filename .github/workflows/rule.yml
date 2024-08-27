@@ -25,8 +25,6 @@ jobs:
           if [ "$ACTION" == "enable" ]; then
             CURRENT_SETTINGS=$(curl -s -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection)
-            
             curl -X PUT \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
