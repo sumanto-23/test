@@ -23,13 +23,17 @@ jobs:
           ACTION: ${{ github.event.inputs.action }}
         run: |
           if [ "$ACTION" == "enable" ]; then
+            # Fetch current branch protection settings
             CURRENT_SETTINGS=$(curl -s -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection/required_pull_request_reviews)
+
+            # Apply branch protection settings
             curl -X PUT \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection/required_pull_request_reviews \
+              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection/required_pull_request_reviews \
               -d '{
                     "restrictions": '"$(echo $CURRENT_SETTINGS | jq '.restrictions')"',
                     "lock_branch": true
@@ -38,7 +42,7 @@ jobs:
             curl -X DELETE \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection
+              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection
           else
             echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
             exit 1
