@@ -1,58 +1,65 @@
-name: Toggle Branch Protection
+name: Toggle Branch Lock
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform: enable or disable'
+        description: 'Enable or Disable branch lock'
         required: true
-        default: 'enable' # Default action
+        default: 'enable'
+        type: choice
+        options:
+          - enable
+          - disable
+      branch:
+        description: 'Branch name to apply protection settings'
+        required: true
+        default: 'main'
+        type: string
 
 jobs:
-  toggle-protection:
+  toggle-branch-lock:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v2
 
-      - name: Toggle branch protection
+      - name: Get Current Branch Protection Settings
+        id: get-protection
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-          BRANCH_NAME: test2
-          ACTION: ${{ github.event.inputs.action }}
         run: |
-          if [ "$ACTION" == "enable" ]; then
-            # Fetch current branch protection settings
-            CURRENT_SETTINGS=$(curl -s -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection)
+          curl -s -H "Authorization: token $PAT_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${{ github.event.inputs.branch }}/protection > protection.json
 
-            # Extract existing protection settings or default to empty values
-            REQUIRED_STATUS_CHECKS=$(echo "$CURRENT_SETTINGS" | jq -r '.required_status_checks // {}')
-            ENFORCE_ADMINS=$(echo "$CURRENT_SETTINGS" | jq -r '.enforce_admins // {}')
-            REQUIRED_PULL_REQUEST_REVIEWS=$(echo "$CURRENT_SETTINGS" | jq -r '.required_pull_request_reviews // {}')
-            RESTRICTIONS=$(echo "$CURRENT_SETTINGS" | jq -r '.restrictions // {"users": [], "teams": []}')
-
-            # Apply branch protection settings with lock_branch only
-            curl -X PUT \
-              -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection \
-              -d '{
-                    "required_status_checks": '"${REQUIRED_STATUS_CHECKS}"',
-                    "enforce_admins": '"${ENFORCE_ADMINS}"',
-                    "required_pull_request_reviews": '"${REQUIRED_PULL_REQUEST_REVIEWS}"',
-                    "restrictions": '"${RESTRICTIONS}"',
-                    "lock_branch": true
-                  }'
-          elif [ "$ACTION" == "disable" ]; then
-            curl -X DELETE \
-              -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection
-          else
-            echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
+      - name: Toggle Branch Lock
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          # Check if the protection settings file exists
+          if [ ! -f protection.json ]; then
+            echo "Protection settings file not found."
             exit 1
           fi
+
+          # Use jq to format the protection settings and add the lock_branch setting
+          jq --arg action "${{ github.event.inputs.action }}" \
+             '.required_pull_request_reviews as $rprr |
+              .enforce_admins as $ea |
+              .required_status_checks as $rsc |
+              .restrictions as $rest |
+              {required_pull_request_reviews: $rprr, enforce_admins: $ea, required_status_checks: $rsc, restrictions: $rest, lock_branch: ($action == "enable")} |
+              if .required_pull_request_reviews == null then .required_pull_request_reviews = {} else . end |
+              if .enforce_admins == null then .enforce_admins = {} else . end |
+              if .required_status_checks == null then .required_status_checks = {} else . end |
+              if .restrictions == null then .restrictions = {} else . end' \
+             protection.json > updated_protection.json
+
+          # Update the branch protection settings
+          curl -X PUT -H "Authorization: token $PAT_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${{ github.event.inputs.branch }}/protection \
+            -d @updated_protection.json
+
+          echo "Branch protection settings updated"
