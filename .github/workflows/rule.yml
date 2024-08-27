@@ -32,7 +32,7 @@ jobs:
             REQUIRED_STATUS_CHECKS=$(echo "$CURRENT_SETTINGS" | jq -r '.required_status_checks // {}')
             ENFORCE_ADMINS=$(echo "$CURRENT_SETTINGS" | jq -r '.enforce_admins // {}')
             REQUIRED_PULL_REQUEST_REVIEWS=$(echo "$CURRENT_SETTINGS" | jq -r '.required_pull_request_reviews // {}')
-            RESTRICTIONS=$(echo "$CURRENT_SETTINGS" | jq -r '.restrictions // {}')
+            RESTRICTIONS=$(echo "$CURRENT_SETTINGS" | jq -r '.restrictions // {"users": [], "teams": []}')
 
             # Apply branch protection settings with lock_branch only
             curl -X PUT \
