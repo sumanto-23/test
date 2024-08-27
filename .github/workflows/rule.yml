@@ -26,22 +26,28 @@ jobs:
             # Fetch current branch protection settings
             CURRENT_SETTINGS=$(curl -s -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection/required_pull_request_reviews)
+              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection)
+            
+            # Extract existing protection settings or default to empty object
+            PROTECTION_SETTINGS=$(echo "$CURRENT_SETTINGS" | jq -c '{restrictions: .restrictions} // {}')
 
-            # Apply branch protection settings
+            # Apply branch protection settings with lock_branch only
             curl -X PUT \
               -H "Authorization: token $PAT_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection/required_pull_request_reviews \
+              https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection \
               -d '{
-                    "restrictions": '"$(echo $CURRENT_SETTINGS | jq '.restrictions')"',
+                    "required_status_checks": null,
+                    "enforce_admins": null,
+                    "required_pull_request_reviews": null,
+                    "restrictions": '"${PROTECTION_SETTINGS}"',
                     "lock_branch": true
                   }'
           elif [ "$ACTION" == "disable" ]; then
             curl -X DELETE \
               -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github.luke-cage-preview+json" \
+              -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${BRANCH_NAME}/protection
           else
             echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
