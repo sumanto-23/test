@@ -1,46 +1,64 @@
-name: Toggle Branch Protection
+name: Manage Branch Lock
 
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Action to perform: enable or disable'
+      branch:
+        description: 'Branch name to lock/unlock'
         required: true
-        default: 'enable' # Default action
+        default: 'main'
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - lock
+          - unlock
 
 jobs:
-  toggle-protection:
+  manage-lock:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Toggle branch protection
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-          BRANCH_NAME: main
-          ACTION: ${{ github.event.inputs.action }}
+      - name: Lock Branch
+        if: inputs.action == 'lock'
         run: |
-          if [ "$ACTION" == "enable" ]; then
-            curl -X PUT \
-              -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection \
-              -d '{
-                    "required_status_checks": null,
-                    "enforce_admins": null,
-                    "required_pull_request_reviews": null,
-                    "restrictions": null
-                  }'
-          elif [ "$ACTION" == "disable" ]; then
-            curl -X DELETE \
-              -H "Authorization: token $PAT_TOKEN" \
-              -H "Accept: application/vnd.github.luke-cage-preview+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$BRANCH_NAME/protection
+          curl -X PUT \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection/lock_branch \
+            -d '{"enabled":true}'
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Branch '${{ inputs.branch }}' locked successfully"
           else
-            echo "Unsupported action: $ACTION. Please use 'enable' or 'disable'."
+            echo "❌ Failed to lock branch '${{ inputs.branch }}'"
             exit 1
           fi
 
+      - name: Unlock Branch
+        if: inputs.action == 'unlock'
+        run: |
+          curl -X DELETE \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection/lock_branch
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Branch '${{ inputs.branch }}' unlocked successfully"
+          else
+            echo "❌ Failed to unlock branch '${{ inputs.branch }}'"
+            exit 1
+          fi
 
+      - name: Verify Lock Status
+        run: |
+          response=$(curl -s \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection)
+          
+          echo "Current protection status:"
+          echo "$response" | jq '.'
