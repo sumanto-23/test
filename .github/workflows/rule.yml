@@ -113,3 +113,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection \
             | jq '{ lock_branch: .lock_branch }'
+            
