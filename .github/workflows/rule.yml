@@ -11,9 +11,7 @@ on:
         description: Action
         required: true
         type: choice
-        options:
-          - lock
-          - unlock
+        options: [lock, unlock]
 
 jobs:
   manage-lock:
@@ -24,66 +22,75 @@ jobs:
     steps:
       - name: Toggle lock_branch only
         run: |
-          set -e
-
+          set -euo pipefail
           BR='${{ inputs.branch }}'
           WANT_LOCK=false
           [ '${{ inputs.action }}' = 'lock' ] && WANT_LOCK=true
-
-          echo "Desired lock_branch: $WANT_LOCK"
-
           CODE=$(curl -s -o current.json -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/branches/$BR/protection || true)
 
           if [ "$CODE" = "404" ]; then
-            echo "No existing protection; creating minimal (lock_branch only)."
-            jq -n --argjson lock "$WANT_LOCK" '{ lock_branch: $lock }' > body.json
+            # Create new minimal protection (include required_status_checks/restrictions as null)
+            jq -n --argjson lock "$WANT_LOCK" '{
+              required_status_checks: null,
+              enforce_admins: false,
+              required_pull_request_reviews: null,
+              restrictions: null,
+              required_linear_history: false,
+              allow_force_pushes: false,
+              allow_deletions: false,
+              block_creations: false,
+              required_conversation_resolution: false,
+              required_signatures: false,
+              required_committer_adherence: false,
+              lock_branch: $lock
+            }' > body.json
           elif [ "$CODE" = "200" ]; then
-            echo "Existing protection found; preserving all other rules."
+            # Preserve everything; supply fields even if null
             jq --argjson lock "$WANT_LOCK" '
               {
-                lock_branch: $lock
-              }
-              + (if .enforce_admins then { enforce_admins: .enforce_admins.enabled } else {} end)
-              + (if .required_status_checks then { required_status_checks: { strict: .required_status_checks.strict, contexts: .required_status_checks.contexts } } else {} end)
-              + (if .required_pull_request_reviews then { required_pull_request_reviews: (
-                  {
+                required_status_checks: (if .required_status_checks
+                  then {
+                    strict: .required_status_checks.strict,
+                    contexts: (.required_status_checks.contexts // []),
+                    checks: (.required_status_checks.checks // [])
+                  } else null end),
+                enforce_admins: (.enforce_admins.enabled // false),
+                required_pull_request_reviews: (if .required_pull_request_reviews
+                  then {
                     dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews,
                     require_code_owner_reviews: .required_pull_request_reviews.require_code_owner_reviews,
                     required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
-                    require_last_push_approval: (.required_pull_request_reviews.require_last_push_approval // false)
-                  }
-                  + (if .required_pull_request_reviews.bypass_pull_request_allowances then {
-                      bypass_pull_request_allowances: {
+                    require_last_push_approval: (.required_pull_request_reviews.require_last_push_approval // false),
+                    bypass_pull_request_allowances: (if .required_pull_request_reviews.bypass_pull_request_allowances
+                      then {
                         users: (.required_pull_request_reviews.bypass_pull_request_allowances.users | map(.login)),
                         teams: (.required_pull_request_reviews.bypass_pull_request_allowances.teams | map(.slug)),
                         apps: (.required_pull_request_reviews.bypass_pull_request_allowances.apps | map(.slug))
-                      }
-                    } else {} end)
-                ) } else {} end)
-              + (if .restrictions then { restrictions: {
-                  users: (.restrictions.users | map(.login)),
-                  teams: (.restrictions.teams | map(.slug)),
-                  apps: (.restrictions.apps | map(.slug))
-                }} else {} end)
-              + (if .required_linear_history then { required_linear_history: .required_linear_history.enabled } else {} end)
-              + (if .allow_force_pushes then { allow_force_pushes: .allow_force_pushes.enabled } else {} end)
-              + (if .allow_deletions then { allow_deletions: .allow_deletions.enabled } else {} end)
-              + (if .block_creations then { block_creations: .block_creations.enabled } else {} end)
-              + (if .required_conversation_resolution then { required_conversation_resolution: .required_conversation_resolution.enabled } else {} end)
-              + (if .required_signatures then { required_signatures: .required_signatures.enabled } else {} end)
-              + (if .required_committer_adherence then { required_committer_adherence: .required_committer_adherence.enabled } else {} end)
-            ' current.json > body.json
+                      } else { users:[], teams:[], apps:[] } end)
+                  } else null end),
+                restrictions: (if .restrictions
+                  then {
+                    users: (.restrictions.users | map(.login)),
+                    teams: (.restrictions.teams | map(.slug)),
+                    apps: (.restrictions.apps | map(.slug))
+                  } else null end),
+                required_linear_history: (.required_linear_history.enabled // false),
+                allow_force_pushes: (.allow_force_pushes.enabled // false),
+                allow_deletions: (.allow_deletions.enabled // false),
+                block_creations: (.block_creations.enabled // false),
+                required_conversation_resolution: (.required_conversation_resolution.enabled // false),
+                required_signatures: (.required_signatures.enabled // false),
+                required_committer_adherence: (.required_committer_adherence.enabled // false),
+                lock_branch: $lock
+              }' current.json > body.json
           else
-            echo "Failed to read current protection (HTTP $CODE)"
-            cat current.json
-            exit 1
+            echo "Fetch failed HTTP $CODE"; cat current.json; exit 1
           fi
 
-          echo "Request body:"
-          cat body.json | jq '.'
+          echo "PUT body:"; jq '.' body.json
 
           PUT_CODE=$(curl -s -o result.json -w "%{http_code}" -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
@@ -92,24 +99,12 @@ jobs:
             -d @body.json)
 
           if [ "$PUT_CODE" != "200" ] && [ "$PUT_CODE" != "201" ]; then
-            echo "Update failed HTTP $PUT_CODE"
-            cat result.json
-            exit 1
+            echo "Update failed HTTP $PUT_CODE"; cat result.json; exit 1
           fi
 
-          echo "Updated lock_branch:"
-          jq '.lock_branch' result.json
-
-          if [ "$WANT_LOCK" = true ]; then
-            echo "✅ Locked $BR"
-          else
-            echo "✅ Unlocked $BR"
-          fi
+          echo "lock_branch -> $(jq -r '.lock_branch' result.json)"
 
       - name: Verify
         run: |
-          curl -s \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection \
-            | jq '{ lock_branch: .lock_branch }'
+          curl -s -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection | jq '{lock_branch: .lock_branch}'
