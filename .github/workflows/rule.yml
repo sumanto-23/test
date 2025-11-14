@@ -49,7 +49,7 @@ jobs:
             echo "Current protection found. Transforming to PUT-compatible format..."
             
             # Transform GET response to PUT-compatible payload
-            # Remove metadata fields and convert nested {enabled: bool} objects
+            # Remove metadata fields, convert nested {enabled: bool} objects, and strip null values
             jq '{
               required_status_checks: (
                 if .required_status_checks then
@@ -67,10 +67,16 @@ jobs:
                     dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews,
                     require_code_owner_reviews: .required_pull_request_reviews.require_code_owner_reviews,
                     required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
-                    require_last_push_approval: .required_pull_request_reviews.require_last_push_approval,
-                    dismissal_restrictions: .required_pull_request_reviews.dismissal_restrictions,
-                    bypass_pull_request_allowances: .required_pull_request_reviews.bypass_pull_request_allowances
-                  }
+                    require_last_push_approval: .required_pull_request_reviews.require_last_push_approval
+                  } + (
+                    if .required_pull_request_reviews.dismissal_restrictions then 
+                      {dismissal_restrictions: .required_pull_request_reviews.dismissal_restrictions} 
+                    else {} end
+                  ) + (
+                    if .required_pull_request_reviews.bypass_pull_request_allowances then 
+                      {bypass_pull_request_allowances: .required_pull_request_reviews.bypass_pull_request_allowances} 
+                    else {} end
+                  )
                 else null end
               ),
               restrictions: .restrictions,
