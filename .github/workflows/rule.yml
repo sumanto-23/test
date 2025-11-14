@@ -4,208 +4,38 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Choose enable to lock the branch, disable to unlock/remove protection.'
+        description: "Choose enable to lock the branch, disable to unlock the branch."
         required: true
         type: choice
         options:
           - enable
           - disable
       branch:
-        description: 'Branch name to toggle (default: main)'
+        description: "Branch name (default: main)"
         required: true
-        default: 'main'
-        type: string
-
-permissions:
-  contents: read
+        default: "main"
 
 jobs:
-  toggle-lock:
+  update-lock:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed for locking branches
+
     steps:
-      - name: Prepare variables
-        run: |
-          set -euo pipefail
-          echo "Branch to toggle: ${{ github.event.inputs.branch }}"
-          echo "BRANCH=${{ github.event.inputs.branch }}" >> $GITHUB_ENV
-          # URL-encode branch (handles slashes) using jq
-          echo "ENCODED_BRANCH=$(jq -rn --arg v '${{ github.event.inputs.branch }}' '$v|@uri')" >> $GITHUB_ENV
-
-      - name: Fetch current protection settings
-        id: current_protection
-        run: |
-          set -euo pipefail
-          echo "Fetching current protection settings for branch '${{ github.event.inputs.branch }}'..."
-          
-          # Fetch current settings; capture both stdout and HTTP code
-          HTTP_CODE=$(curl -w "%{http_code}" -o protection_raw.json -L \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection")
-          
-          echo "HTTP_CODE=${HTTP_CODE}" >> $GITHUB_ENV
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "Current protection found. Transforming to PUT-compatible format..."
-            
-            # Transform GET response to PUT-compatible payload
-            # Remove metadata fields, convert nested {enabled: bool} objects
-            # Note: restrictions must always be included (even if null) per GitHub API validation
-            jq '{
-              required_status_checks: (
-                if .required_status_checks then
-                  {
-                    strict: .required_status_checks.strict,
-                    contexts: .required_status_checks.contexts,
-                    checks: .required_status_checks.checks
-                  }
-                else null end
-              ),
-              enforce_admins: .enforce_admins.enabled,
-              required_pull_request_reviews: (
-                if .required_pull_request_reviews then
-                  {
-                    dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews,
-                    require_code_owner_reviews: .required_pull_request_reviews.require_code_owner_reviews,
-                    required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
-                    require_last_push_approval: .required_pull_request_reviews.require_last_push_approval
-                  } + (
-                    if .required_pull_request_reviews.dismissal_restrictions then 
-                      {dismissal_restrictions: .required_pull_request_reviews.dismissal_restrictions} 
-                    else {} end
-                  ) + (
-                    if .required_pull_request_reviews.bypass_pull_request_allowances then 
-                      {bypass_pull_request_allowances: .required_pull_request_reviews.bypass_pull_request_allowances} 
-                    else {} end
-                  )
-                else null end
-              ),
-              restrictions: .restrictions,
-              required_linear_history: .required_linear_history.enabled,
-              allow_force_pushes: .allow_force_pushes.enabled,
-              allow_deletions: .allow_deletions.enabled,
-              block_creations: .block_creations.enabled,
-              required_conversation_resolution: .required_conversation_resolution.enabled,
-              lock_branch: (.lock_branch.enabled // false),
-              allow_fork_syncing: .allow_fork_syncing.enabled
-            }' protection_raw.json > protection.json
-            
-            echo "Transformed protection settings:"
-            cat protection.json
-            echo "HAS_PROTECTION=true" >> $GITHUB_ENV
-          elif [ "$HTTP_CODE" = "404" ]; then
-            echo "No protection currently set. Will create new protection with minimal settings."
-            echo "HAS_PROTECTION=false" >> $GITHUB_ENV
-            # Create minimal protection JSON for branches without existing rules
-            cat > protection.json <<'EOF'
-          {
-            "required_status_checks": null,
-            "enforce_admins": false,
-            "required_pull_request_reviews": null,
-            "restrictions": null,
-            "required_linear_history": false,
-            "allow_force_pushes": false,
-            "allow_deletions": false,
-            "block_creations": false,
-            "required_conversation_resolution": false,
-            "lock_branch": false,
-            "allow_fork_syncing": false
-          }
-          EOF
-          else
-            echo "Unexpected HTTP code: ${HTTP_CODE}"
-            cat protection_raw.json || true
-            exit 1
-          fi
-
-      - name: Enable lock_branch on branch
+      - name: Lock branch
         if: ${{ github.event.inputs.action == 'enable' }}
         run: |
-          set -euo pipefail
-          echo "Enabling lock_branch protection on '${{ github.event.inputs.branch }}' branch (preserving existing settings)..."
-          
-          # Merge existing protection with lock_branch: true
-          jq '. + {"lock_branch": true}' protection.json > protection_updated.json
-          
-          echo "Updated protection payload:"
-          cat protection_updated.json
-          
-          # Use verbose curl to see the actual error response
-          HTTP_RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" -L -X PUT \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+          echo "Locking branch: ${{ github.event.inputs.branch }}"
+          curl -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
-            -d @protection_updated.json 2>&1)
-          
-          HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
-          RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '/HTTP_CODE:/d')
-          
-          echo "Response body:"
-          echo "$RESPONSE_BODY" | jq '.' || echo "$RESPONSE_BODY"
-          
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Error: HTTP $HTTP_CODE"
-            exit 1
-          fi
-          
-          echo "Branch lock enabled successfully."
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/lock
 
-      - name: Disable lock_branch on branch
+      - name: Unlock branch
         if: ${{ github.event.inputs.action == 'disable' }}
         run: |
-          set -euo pipefail
-          echo "Disabling lock_branch protection on '${{ github.event.inputs.branch }}' branch (preserving all other settings)..."
-          
-          if [ "$HAS_PROTECTION" = "false" ]; then
-            echo "No existing protection found. Nothing to disable."
-            exit 0
-          fi
-          
-          # Merge existing protection with lock_branch: false
-          jq '. + {"lock_branch": false}' protection.json > protection_updated.json
-          
-          echo "Updated protection payload:"
-          cat protection_updated.json
-          
-          # Use verbose curl to see the actual error response
-          HTTP_RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" -L -X PUT \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+          echo "Unlocking branch: ${{ github.event.inputs.branch }}"
+          curl -X DELETE \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
-            -d @protection_updated.json 2>&1)
-          
-          HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
-          RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '/HTTP_CODE:/d')
-          
-          echo "Response body:"
-          echo "$RESPONSE_BODY" | jq '.' || echo "$RESPONSE_BODY"
-          
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Error: HTTP $HTTP_CODE"
-            exit 1
-          fi
-          
-          echo "Branch lock disabled successfully."
-
-      - name: Verify result
-        run: |
-          set -euo pipefail
-          echo ""
-          echo "========================================="
-          echo "Final protection settings for '${{ github.event.inputs.branch }}':"
-          echo "========================================="
-          curl -f -L -X GET \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" | jq '.'
-
-# Notes:
-# - This workflow fetches current branch protection settings and only toggles the lock_branch field.
-#   All other protection rules (required reviews, status checks, etc.) are preserved.
-# - If your repository uses Rulesets instead of legacy branch protection, adjust to use the 
-#   /repos/{owner}/{repo}/rulesets endpoints.
-# - Provide a PAT secret named PAT_TOKEN belonging to a user with admin rights on the repo.
-#   Required scopes: repo (full). GITHUB_TOKEN cannot modify branch protections.
-# - Trigger manually via Actions > Toggle main branch lock > Run workflow. Provide branch name (default main).
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/lock
