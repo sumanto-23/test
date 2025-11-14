@@ -20,9 +20,10 @@ jobs:
   control-branch:
     runs-on: ubuntu-latest
     steps:
-      - name: Lock or Unlock the branch
-        uses: JustinDFuller/github-action-lock-branch@v1
-        with:
-          lock: ${{ github.event.inputs.action == 'lock' }}
-          token: ${{ secrets.PAT_TOKEN }}
-          branch: ${{ github.event.inputs.branch }}
+     - name: Lock branch
+       id: lock
+       uses: JustinDFuller/github-action-lock-branch@v1
+       with:
+        lock: ${{ github.event.inputs.action == 'lock' }}
+        token: ${{ secrets.PAT_TOKEN }}
+        branch: ${{ github.event.inputs.branch }}
