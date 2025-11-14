@@ -38,7 +38,7 @@ jobs:
           echo "Fetching current protection settings for branch '${{ github.event.inputs.branch }}'..."
           
           # Fetch current settings; capture both stdout and HTTP code
-          HTTP_CODE=$(curl -w "%{http_code}" -o protection.json -L \
+          HTTP_CODE=$(curl -w "%{http_code}" -o protection_raw.json -L \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection")
@@ -46,7 +46,25 @@ jobs:
           echo "HTTP_CODE=${HTTP_CODE}" >> $GITHUB_ENV
           
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "Current protection found. Will merge with existing settings."
+            echo "Current protection found. Transforming to PUT-compatible format..."
+            
+            # Transform GET response to PUT-compatible payload
+            # Extract only the fields needed for PUT and convert nested {enabled: bool} objects
+            jq '{
+              required_status_checks: .required_status_checks,
+              enforce_admins: .enforce_admins.enabled,
+              required_pull_request_reviews: .required_pull_request_reviews,
+              restrictions: .restrictions,
+              required_linear_history: .required_linear_history.enabled,
+              allow_force_pushes: .allow_force_pushes.enabled,
+              allow_deletions: .allow_deletions.enabled,
+              block_creations: .block_creations.enabled,
+              required_conversation_resolution: .required_conversation_resolution.enabled,
+              lock_branch: (.lock_branch.enabled // false),
+              allow_fork_syncing: .allow_fork_syncing.enabled
+            }' protection_raw.json > protection.json
+            
+            echo "Transformed protection settings:"
             cat protection.json
             echo "HAS_PROTECTION=true" >> $GITHUB_ENV
           elif [ "$HTTP_CODE" = "404" ]; then
@@ -63,12 +81,14 @@ jobs:
             "allow_force_pushes": false,
             "allow_deletions": false,
             "block_creations": false,
-            "required_conversation_resolution": false
+            "required_conversation_resolution": false,
+            "lock_branch": false,
+            "allow_fork_syncing": false
           }
           EOF
           else
             echo "Unexpected HTTP code: ${HTTP_CODE}"
-            cat protection.json || true
+            cat protection_raw.json || true
             exit 1
           fi
 
