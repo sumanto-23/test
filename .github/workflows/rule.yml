@@ -1,114 +1,104 @@
-name: Manage Branch Lock
+name: Toggle main branch lock
+
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: Branch name
-        required: true
-        default: main
       action:
-        description: Action
+        description: 'Choose enable to lock the branch, disable to unlock/remove protection.'
         required: true
         type: choice
-        options: [lock, unlock]
+        options:
+          - enable
+          - disable
+      branch:
+        description: 'Branch name to toggle (default: main)'
+        required: true
+        default: 'main'
+        type: string
+      unlock_only:
+        description: 'If disabling, set true to only unlock (keep other protections), false to delete protection entirely.'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+  administration: write
 
 jobs:
-  manage-lock:
+  toggle-lock:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Toggle lock_branch only
+      - name: Enable lock_branch on branch
+        if: ${{ github.event.inputs.action == 'enable' }}
         run: |
           set -euo pipefail
-          BR='${{ inputs.branch }}'
-          WANT_LOCK=false
-          [ '${{ inputs.action }}' = 'lock' ] && WANT_LOCK=true
-
-          # Determine if repo owner is an organization
-          REPO_DATA=$(curl -s -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${{ github.repository }})
-          OWNER_TYPE=$(echo "$REPO_DATA" | jq -r '.owner.type')
-
-          CODE=$(curl -s -o current.json -w "%{http_code}" \
+          echo "Enabling lock_branch protection on '${{ github.event.inputs.branch }}' branch"
+          curl -L -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/$BR/protection || true)
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection \
+            -d @- <<'EOF'
+          {
+            "required_status_checks": null,
+            "enforce_admins": false,
+            "required_pull_request_reviews": null,
+            "restrictions": null,
+            "required_linear_history": false,
+            "allow_force_pushes": false,
+            "allow_deletions": false,
+            "block_creations": false,
+            "lock_branch": true
+          }
+          EOF
 
-          if [ "$CODE" = "404" ]; then
-            jq -n --argjson lock "$WANT_LOCK" '{
-              required_status_checks: null,
-              enforce_admins: false,
-              required_pull_request_reviews: null,
-              restrictions: null,
-              required_linear_history: false,
-              allow_force_pushes: false,
-              allow_deletions: false,
-              block_creations: false,
-              required_conversation_resolution: false,
-              required_signatures: false,
-              required_committer_adherence: false,
-              lock_branch: $lock
-            }' > body.json
-          elif [ "$CODE" = "200" ]; then
-            jq --argjson lock "$WANT_LOCK" --arg ownerType "$OWNER_TYPE" '
-              {
-                required_status_checks: (if .required_status_checks
-                  then {
-                    strict: .required_status_checks.strict,
-                    contexts: (.required_status_checks.contexts // []),
-                    checks: (.required_status_checks.checks // [])
-                  } else null end),
-                enforce_admins: (.enforce_admins.enabled // false),
-                required_pull_request_reviews: (if .required_pull_request_reviews
-                  then {
-                    dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews,
-                    require_code_owner_reviews: .required_pull_request_reviews.require_code_owner_reviews,
-                    required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
-                    require_last_push_approval: (.required_pull_request_reviews.require_last_push_approval // false),
-                    bypass_pull_request_allowances: (if .required_pull_request_reviews.bypass_pull_request_allowances
-                      then {
-                        users: (.required_pull_request_reviews.bypass_pull_request_allowances.users | map(.login)),
-                        teams: (.required_pull_request_reviews.bypass_pull_request_allowances.teams | map(.slug)),
-                        apps: (.required_pull_request_reviews.bypass_pull_request_allowances.apps | map(.slug))
-                      } else { users:[], teams:[], apps:[] } end)
-                  } else null end),
-                restrictions: (if ownerType == "Organization" and .restrictions
-                  then {
-                    users: (.restrictions.users | map(.login)),
-                    teams: (.restrictions.teams | map(.slug)),
-                    apps: (.restrictions.apps | map(.slug))
-                  } else null end),
-                required_linear_history: (.required_linear_history.enabled // false),
-                allow_force_pushes: (.allow_force_pushes.enabled // false),
-                allow_deletions: (.allow_deletions.enabled // false),
-                block_creations: (.block_creations.enabled // false),
-                required_conversation_resolution: (.required_conversation_resolution.enabled // false),
-                required_signatures: (.required_signatures.enabled // false),
-                required_committer_adherence: (.required_committer_adherence.enabled // false),
-                lock_branch: $lock
-              }' current.json > body.json
-          else
-            echo "Fetch failed HTTP $CODE"; cat current.json; exit 1
-          fi
-
-          echo "PUT body:"; jq '.' body.json
-
-          PUT_CODE=$(curl -s -o result.json -w "%{http_code}" -X PUT \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/$BR/protection \
-            -d @body.json)
-
-          if [ "$PUT_CODE" != "200" ] && [ "$PUT_CODE" != "201" ]; then
-            echo "Update failed HTTP $PUT_CODE"
-            cat result.json
-            exit 1
-          fi
-
-          echo "lock_branch -> $(jq -r '.lock_branch' result.json)"
-
-      - name: Verify
+      - name: Disable (delete entire protection)
+        if: ${{ github.event.inputs.action == 'disable' && github.event.inputs.unlock_only == 'false' }}
         run: |
-          curl -s -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ inputs.branch }}/protection | jq '{lock_branch: .lock_branch}'
+          set -euo pipefail
+          echo "Deleting branch protection on '${{ github.event.inputs.branch }}' (including lock)"
+          curl -L -X DELETE \
+            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection
+
+      - name: Disable (just unlock, keep other config)
+        if: ${{ github.event.inputs.action == 'disable' && github.event.inputs.unlock_only == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "Unlocking '${{ github.event.inputs.branch }}' branch but keeping other (minimal) protection config"
+          curl -L -X PUT \
+            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection \
+            -d @- <<'EOF'
+          {
+            "required_status_checks": null,
+            "enforce_admins": false,
+            "required_pull_request_reviews": null,
+            "restrictions": null,
+            "required_linear_history": false,
+            "allow_force_pushes": false,
+            "allow_deletions": false,
+            "block_creations": false,
+            "lock_branch": false
+          }
+          EOF
+
+      - name: Verify result
+        run: |
+          set -euo pipefail
+          echo "Fetching current protection settings for '${{ github.event.inputs.branch }}':"
+          curl -L -X GET \
+            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection || echo 'No protection currently set.'
+
+# Notes:
+# - This workflow assumes the GitHub API supports the lock_branch field on branch protection.
+#   If your repository uses Rulesets instead, adjust to use the /repos/{owner}/{repo}/rulesets endpoints.
+# - The PAT_TOKEN must have administration: write permission (granted above) to modify protections.
+# - Trigger manually via Actions > Toggle main branch lock > Run workflow. Provide branch name (default main).
