@@ -49,11 +49,30 @@ jobs:
             echo "Current protection found. Transforming to PUT-compatible format..."
             
             # Transform GET response to PUT-compatible payload
-            # Extract only the fields needed for PUT and convert nested {enabled: bool} objects
+            # Remove metadata fields and convert nested {enabled: bool} objects
             jq '{
-              required_status_checks: .required_status_checks,
+              required_status_checks: (
+                if .required_status_checks then
+                  {
+                    strict: .required_status_checks.strict,
+                    contexts: .required_status_checks.contexts,
+                    checks: .required_status_checks.checks
+                  }
+                else null end
+              ),
               enforce_admins: .enforce_admins.enabled,
-              required_pull_request_reviews: .required_pull_request_reviews,
+              required_pull_request_reviews: (
+                if .required_pull_request_reviews then
+                  {
+                    dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews,
+                    require_code_owner_reviews: .required_pull_request_reviews.require_code_owner_reviews,
+                    required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
+                    require_last_push_approval: .required_pull_request_reviews.require_last_push_approval,
+                    dismissal_restrictions: .required_pull_request_reviews.dismissal_restrictions,
+                    bypass_pull_request_allowances: .required_pull_request_reviews.bypass_pull_request_allowances
+                  }
+                else null end
+              ),
               restrictions: .restrictions,
               required_linear_history: .required_linear_history.enabled,
               allow_force_pushes: .allow_force_pushes.enabled,
