@@ -49,7 +49,7 @@ jobs:
             echo "Current protection found. Transforming to PUT-compatible format..."
             
             # Transform GET response to PUT-compatible payload
-            # Remove metadata fields, convert nested {enabled: bool} objects, and strip null values
+            # Remove metadata fields, convert nested {enabled: bool} objects, and strip all null values
             jq '{
               required_status_checks: (
                 if .required_status_checks then
@@ -87,7 +87,10 @@ jobs:
               required_conversation_resolution: .required_conversation_resolution.enabled,
               lock_branch: (.lock_branch.enabled // false),
               allow_fork_syncing: .allow_fork_syncing.enabled
-            }' protection_raw.json > protection.json
+            } | 
+            # Remove all null values from the object
+            with_entries(select(.value != null))
+            ' protection_raw.json > protection.json
             
             echo "Transformed protection settings:"
             cat protection.json
@@ -129,12 +132,24 @@ jobs:
           echo "Updated protection payload:"
           cat protection_updated.json
           
-          curl -f -L -X PUT \
+          # Use verbose curl to see the actual error response
+          HTTP_RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" -L -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
-            -d @protection_updated.json
+            -d @protection_updated.json 2>&1)
+          
+          HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+          RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '/HTTP_CODE:/d')
+          
+          echo "Response body:"
+          echo "$RESPONSE_BODY" | jq '.' || echo "$RESPONSE_BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Error: HTTP $HTTP_CODE"
+            exit 1
+          fi
           
           echo "Branch lock enabled successfully."
 
@@ -155,12 +170,24 @@ jobs:
           echo "Updated protection payload:"
           cat protection_updated.json
           
-          curl -f -L -X PUT \
+          # Use verbose curl to see the actual error response
+          HTTP_RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" -L -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
-            -d @protection_updated.json
+            -d @protection_updated.json 2>&1)
+          
+          HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+          RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '/HTTP_CODE:/d')
+          
+          echo "Response body:"
+          echo "$RESPONSE_BODY" | jq '.' || echo "$RESPONSE_BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Error: HTTP $HTTP_CODE"
+            exit 1
+          fi
           
           echo "Branch lock disabled successfully."
 
