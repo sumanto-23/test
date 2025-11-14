@@ -24,5 +24,5 @@ jobs:
         uses: JustinDFuller/github-action-lock-branch@v1
         with:
           lock: ${{ github.event.inputs.action == 'lock' }}
-          token: ${{ secrets.LOCK_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
           branch: ${{ github.event.inputs.branch }}
