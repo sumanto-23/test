@@ -1,17 +1,47 @@
-name: unlock
-
-on:
+name: GitHub Actions Demo
+ on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  unlock:
+  Schedule:
     runs-on: ubuntu-latest
+
     steps:
-      # Unlock
-      - uses: github/lock@vX.X.X
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Lock branch
         id: lock
+        uses: ./
         with:
-          mode: "unlock"
+          token: ${{ secrets.PAT_TOKEN }}
+          owner: JustinDFuller
+          repository: test
+          branch: main
+          lock: true
+
+      - name: UnLock branch
+        id: unlock
+        uses: ./
+        with:
+          branch: main
+          token: ${{ secrets.PAT_TOKEN }}
+          lock: false
+
+      - run: echo "(lock) locked=${{ steps.lock.outputs.locked }}"
+      - run: echo "(lock) unlocked=${{ steps.lock.outputs.unlocked }}"
+      - run: echo "(lock) changed=${{ steps.lock.outputs.changed }}"
+      - run: echo "(lock) success=${{ steps.lock.outputs.success }}"
+      - run: echo "(lock) failure=${{ steps.lock.outputs.failure }}"
+      - run: echo "(lock) owner=${{ steps.lock.outputs.owner }}"
+      - run: echo "(lock) repository=${{ steps.lock.outputs.repository }}"
+      - run: echo "(lock) branch=${{ steps.lock.outputs.branch }}"
+
+      - run: echo "(unlock) locked=${{ steps.unlock.outputs.locked }}"
+      - run: echo "(unlock) unlocked=${{ steps.unlock.outputs.unlocked }}"
+      - run: echo "(unlock) changed=${{ steps.unlock.outputs.changed }}"
+      - run: echo "(unlock) success=${{ steps.unlock.outputs.success }}"
+      - run: echo "(unlock) failure=${{ steps.unlock.outputs.failure }}"
+      - run: echo "(unlock) owner=${{ steps.unlock.outputs.owner }}"
+      - run: echo "(unlock) repository=${{ steps.unlock.outputs.repository }}"
+      - run: echo "(unlock) branch=${{ steps.unlock.outputs.branch }}"
