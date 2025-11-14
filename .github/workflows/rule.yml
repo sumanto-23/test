@@ -25,13 +25,20 @@ on:
           - 'true'
 
 permissions:
-  contents: write
-  administration: write
+  contents: read
 
 jobs:
   toggle-lock:
     runs-on: ubuntu-latest
     steps:
+      - name: Prepare variables
+        run: |
+          set -euo pipefail
+          echo "Branch to toggle: ${{ github.event.inputs.branch }}"
+          echo "BRANCH=${{ github.event.inputs.branch }}" >> $GITHUB_ENV
+          # URL-encode branch (handles slashes) using jq
+          echo "ENCODED_BRANCH=$(jq -rn --arg v '${{ github.event.inputs.branch }}' '$v|@uri')" >> $GITHUB_ENV
+
       - name: Enable lock_branch on branch
         if: ${{ github.event.inputs.action == 'enable' }}
         run: |
@@ -40,7 +47,7 @@ jobs:
           curl -L -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection \
+            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
             -d @- <<'EOF'
           {
             "required_status_checks": null,
@@ -63,7 +70,7 @@ jobs:
           curl -L -X DELETE \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection
+            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection"
 
       - name: Disable (just unlock, keep other config)
         if: ${{ github.event.inputs.action == 'disable' && github.event.inputs.unlock_only == 'true' }}
@@ -73,7 +80,7 @@ jobs:
           curl -L -X PUT \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection \
+            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" \
             -d @- <<'EOF'
           {
             "required_status_checks": null,
@@ -95,10 +102,11 @@ jobs:
           curl -L -X GET \
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/branches/${{ github.event.inputs.branch }}/protection || echo 'No protection currently set.'
+            "https://api.github.com/repos/${{ github.repository }}/branches/${ENCODED_BRANCH}/protection" || echo 'No protection currently set.'
 
 # Notes:
 # - This workflow assumes the GitHub API supports the lock_branch field on branch protection.
 #   If your repository uses Rulesets instead, adjust to use the /repos/{owner}/{repo}/rulesets endpoints.
-# - The PAT_TOKEN must have administration: write permission (granted above) to modify protections.
+# - Provide a PAT secret named PAT_TOKEN belonging to a user with admin rights on the repo.
+#   Required scopes: repo (full), optionally admin:repo_hook if managing hooks later. GITHUB_TOKEN cannot modify protections.
 # - Trigger manually via Actions > Toggle main branch lock > Run workflow. Provide branch name (default main).
